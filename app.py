@@ -50,9 +50,9 @@ def load_ai_engine():
     device = torch.device('cpu') 
     model = LumoPredictorGAT(num_node_features=11).to(device)
     try:
-        model.load_state_dict(torch.load('model_A_polymer_expert.pth', map_location=device))
+        model.load_state_dict(torch.load('upgraded_n_type_expert.pth', map_location=device))
     except:
-        pass # Will handle missing file gracefully in the UI
+        pass # dont crash if file is missing
     scaler = joblib.load('polymer_lumo_scaler.pkl')
     return model, scaler, device
 
@@ -60,8 +60,8 @@ model, scaler, device = load_ai_engine()
 
 st.title("🧪 TEG Discovery & Training Studio")
 
-# Create Two Tabs for the App
-tab1, tab2 = st.tabs(["🧪 Predict Stability", "⚙️ Train the AI"])
+# made 3 tabs now instead of 2
+tab1, tab2, tab3 = st.tabs(["🧪 Predict Stability", "⚙️ Train the AI", "📁 Batch Screening"])
 
 # ==========================================
 # TAB 1: PREDICTION
@@ -71,7 +71,6 @@ with tab1:
     user_smiles = st.text_input("Enter Molecule SMILES:", "N#CC(C#N)=C1C=CC(=C(C#N)C#N)C=C1")
 
     if st.button("Predict Stability", type="primary"):
-        # 1. LOCK THE AI BRAIN
         torch.manual_seed(42)
         model.eval() 
         
@@ -81,7 +80,6 @@ with tab1:
                 st.error("Invalid SMILES string.")
             else:
                 mol = Chem.AddHs(mol)
-                # 2. LOCK THE 3D GEOMETRY
                 AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
                 AllChem.UFFOptimizeMolecule(mol, maxIters=1000)
                     
@@ -95,7 +93,6 @@ with tab1:
                     edges.extend([[i, j], [j, i]])
                     dists.extend([d, d])
                         
-                # 3. FIXED INDENTATION: Pulled out of the for loop!
                 edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous().to(device)
                 edge_attr = torch.tensor(dists, dtype=torch.float).to(device)
                 batch = torch.zeros(mol.GetNumAtoms(), dtype=torch.long).to(device)
@@ -121,10 +118,7 @@ with tab2:
     st.markdown("### Fine-Tune on Custom Data")
     st.info("Upload a CSV file with two columns: `smiles` and `LUMO`. The AI will adapt its weights to your dataset.")
     
-    # 1. File Uploader
-    uploaded_file = st.file_uploader("Upload N-Type Dataset (CSV)", type=['csv'])
-    
-    # 2. Epoch Editor
+    uploaded_file = st.file_uploader("Upload Dataset (CSV)", type=['csv'])
     epochs = st.number_input("Set Number of Epochs", min_value=1, max_value=1000, value=100, step=10)
     
     if uploaded_file and st.button("Start Fine-Tuning 🚀"):
@@ -134,8 +128,6 @@ with tab2:
             st.error("CSV must contain 'smiles' and 'LUMO' columns.")
         else:
             st.write(f"Loaded {len(df_custom)} molecules. Processing 3D geometries...")
-            
-            # Prepare Data
             graphs = []
             df_custom['Scaled_LUMO'] = scaler.transform(df_custom[['LUMO']])
             
@@ -163,13 +155,9 @@ with tab2:
                             edge_attr=torch.tensor(dists, dtype=torch.float), 
                             y=torch.tensor([[row['Scaled_LUMO']]], dtype=torch.float))
                 graphs.append(data)
-                
-                # Update progress bar
                 progress_bar.progress(min((idx + 1) / len(df_custom), 1.0))
             
             st.success("Geometries generated! Starting PyTorch Training...")
-            
-            # Training Loop
             loader = DataLoader(graphs, batch_size=16, shuffle=True)
             optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
             loss_fn = torch.nn.MSELoss()
@@ -189,14 +177,12 @@ with tab2:
                     optimizer.step()
                     total_loss += loss.item()
                 
-                # Update UI every 5 epochs
                 if epoch % 5 == 0 or epoch == epochs:
                     train_progress.progress(epoch / epochs)
                     status_text.text(f"Epoch {epoch}/{epochs} | Loss: {total_loss/len(loader):.4f}")
             
             st.success("🎉 Fine-Tuning Complete!")
             
-            # Save the newly trained weights into memory so user can download them
             buffer = io.BytesIO()
             torch.save(model.state_dict(), buffer)
             buffer.seek(0)
@@ -207,4 +193,80 @@ with tab2:
                 file_name="upgraded_n_type_expert.pth",
                 mime="application/octet-stream"
             )
+
+# ==========================================
+# TAB 3: BATCH SCREENING
+# ==========================================
+with tab3:
+    st.markdown("### High-Throughput Batch Screening")
+    st.info("Upload a CSV with a column named `smiles`. The engine will predict LUMO for every molecule and generate a report.")
+    
+    batch_file = st.file_uploader("Upload Batch CSV", type=['csv'], key="batch_uploader")
+    
+    if batch_file and st.button("Run Batch Screen ⚡", type="primary"):
+        df_batch = pd.read_csv(batch_file)
+        
+        if 'smiles' not in df_batch.columns:
+            st.error("Error: The CSV must have a column named 'smiles'.")
+        else:
+            st.write(f"Found {len(df_batch)} molecules. Starting quantum predictions...")
+            results = []
+            
+            # lock the ai brain for the whole batch
+            torch.manual_seed(42)
+            model.eval()
+            
+            progress_bar = st.progress(0)
+            
+            for idx, row in df_batch.iterrows():
+                smiles_input = row['smiles']
+                mol = Chem.MolFromSmiles(str(smiles_input))
+                
+                if not mol:
+                    results.append("Invalid SMILES")
+                    continue
+                    
+                mol = Chem.AddHs(mol)
+                try:
+                    # lock the geometry generation
+                    AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
+                    AllChem.UFFOptimizeMolecule(mol, maxIters=1000)
+                    
+                    x = torch.tensor([get_unified_features(a) for a in mol.GetAtoms()], dtype=torch.float).to(device)
+                    edges, dists = [], []
+                    conf = mol.GetConformer()
+                    for bond in mol.GetBonds():
+                        i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+                        d = conf.GetAtomPosition(i).Distance(conf.GetAtomPosition(j))
+                        edges.extend([[i, j], [j, i]])
+                        dists.extend([d, d])
+                    
+                    if not edges:
+                        results.append("Geometry Error")
+                        continue
+                        
+                    edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous().to(device)
+                    edge_attr = torch.tensor(dists, dtype=torch.float).to(device)
+                    batch_tensor = torch.zeros(mol.GetNumAtoms(), dtype=torch.long).to(device)
+
+                    with torch.no_grad():
+                        scaled_pred = model(x, edge_index, edge_attr, batch_tensor).cpu().numpy()
+                        predicted_ev = scaler.inverse_transform(scaled_pred)[0][0]
+                        results.append(round(predicted_ev, 3))
+                except Exception as e:
+                    results.append("Error")
+                
+                progress_bar.progress(min((idx + 1) / len(df_batch), 1.0))
+                
+            df_batch['Predicted_LUMO'] = results
+            st.success("Batch screening finished!")
+            
+            csv_buffer = df_batch.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Results CSV",
+                data=csv_buffer,
+                file_name="screening_results.csv",
+                mime="text/csv",
+            )
+            
             

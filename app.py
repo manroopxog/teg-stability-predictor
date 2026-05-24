@@ -89,7 +89,7 @@ with tab1:
                 
             edges, dists = [], []
             conf = mol.GetConformer()
-                for bond in mol.GetBonds():
+            for bond in mol.GetBonds():
                     i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
                     d = conf.GetAtomPosition(i).Distance(conf.GetAtomPosition(j))
                     edges.extend([[i, j], [j, i]])

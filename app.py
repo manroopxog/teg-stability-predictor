@@ -77,9 +77,9 @@ with tab1:
     
     with st.spinner("Calculating quantum spatial features..."):
         mol = Chem.MolFromSmiles(user_smiles)
-         if not mol:
+        if not mol:
             st.error("Invalid SMILES string.")
-         else:
+        else:
             mol = Chem.AddHs(mol)
             # 2. LOCK THE 3D GEOMETRY
             AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)

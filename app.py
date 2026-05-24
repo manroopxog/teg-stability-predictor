@@ -71,11 +71,11 @@ with tab1:
     user_smiles = st.text_input("Enter Molecule SMILES:", "N#CC(C#N)=C1C=CC(=C(C#N)C#N)C=C1")
 
     if st.button("Predict Stability", type="primary"):
-     # 1. LOCK THE AI BRAIN
-     torch.manual_seed(42)
-     model.eval() 
+        # 1. LOCK THE AI BRAIN
+        torch.manual_seed(42)
+        model.eval() 
     
-    with st.spinner("Calculating quantum spatial features..."):
+        with st.spinner("Calculating quantum spatial features..."):
         mol = Chem.MolFromSmiles(user_smiles)
         if not mol:
             st.error("Invalid SMILES string.")

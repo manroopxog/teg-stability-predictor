@@ -90,10 +90,10 @@ with tab1:
             edges, dists = [], []
             conf = mol.GetConformer()
             for bond in mol.GetBonds():
-                    i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-                    d = conf.GetAtomPosition(i).Distance(conf.GetAtomPosition(j))
-                    edges.extend([[i, j], [j, i]])
-                    dists.extend([d, d])
+                i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+                d = conf.GetAtomPosition(i).Distance(conf.GetAtomPosition(j))
+                edges.extend([[i, j], [j, i]])
+                dists.extend([d, d])
                     
                 edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous().to(device)
                 edge_attr = torch.tensor(dists, dtype=torch.float).to(device)

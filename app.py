@@ -50,7 +50,7 @@ def load_ai_engine():
     device = torch.device('cpu') 
     model = LumoPredictorGAT(num_node_features=11).to(device)
     try:
-        model.load_state_dict(torch.load('upgraded_n_type_expert (2).pth', map_location=device))
+        model.load_state_dict(torch.load('upgraded_n_type_expert (4).pth', map_location=device))
     except:
         pass # dont crash if file is missing
     scaler = joblib.load('polymer_lumo_scaler.pkl')

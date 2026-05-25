@@ -1,7 +1,7 @@
 <h1>Bipolar Organic Semiconductor Screening Engine ⚛️</h1>
 
 # Model A: High-Throughput LUMO Screener
-🚀 **[Click Here to Test the Live Web App](https://your-streamlit-app-url.streamlit.app/)**
+🚀 **[Click Here to Test the Live Web App](https://teg-stability-predictor-ajupdywh7jmcxqcfaoiecy.streamlit.app/)**
 
 This repository contains the Graph Attention Network (GAT) architecture used to predict the air-stability (LUMO levels) of n-type organic semiconductors...
 

@@ -1,5 +1,10 @@
 <h1>Bipolar Organic Semiconductor Screening Engine ⚛️</h1>
 
+# Model A: High-Throughput LUMO Screener
+🚀 **[Click Here to Test the Live Web App](https://your-streamlit-app-url.streamlit.app/)**
+
+This repository contains the Graph Attention Network (GAT) architecture used to predict the air-stability (LUMO levels) of n-type organic semiconductors...
+
 <h2>Overview</h2>
 <p>This repository contains a deployed, continuous-learning machine learning pipeline for the high-throughput screening of organic semiconductor stability. The engine utilizes a <strong>Graph Attention Network (GAT)</strong> to predict the Lowest Unoccupied Molecular Orbital (LUMO) energy levels directly from SMILES strings, enabling rapid classification of n-type, p-type, and ambipolar materials.</p>
 

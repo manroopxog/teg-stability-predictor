@@ -7,3 +7,4 @@ pandas
 joblib
 py3Dmol
 stmol
+ipython_genutils

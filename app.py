@@ -90,7 +90,7 @@ with tab1:
             # Set up the 3D viewer (spinning stick model)
             viewer = py3Dmol.view(width=400, height=400)
             viewer.addModel(mblock, "mol")
-            viewer.setStyle({'stick': {}})
+            viewer.setStyle({'stick': {}, 'sphere': {'radius': 0.4}})
             viewer.zoomTo()
             
             # Render it in Streamlit

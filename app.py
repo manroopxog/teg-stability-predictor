@@ -9,6 +9,12 @@ from rdkit.Chem import AllChem
 import joblib
 import pandas as pd
 import io
+import streamlit as st
+from rdkit import Chem
+from rdkit.Chem import AllChem
+import py3Dmol
+from stmol import showmol
+
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="N-Type Semiconductor AI", page_icon="⚛️", layout="centered")
@@ -69,6 +75,30 @@ tab1, tab2, tab3 = st.tabs(["🧪 Predict Stability", "⚙️ Train the AI", "�
 with tab1:
     st.markdown("Enter the SMILES string of a hypothetical organic semiconductor.")
     user_smiles = st.text_input("Enter Molecule SMILES:", "N#CC(C#N)=C1C=CC(=C(C#N)C#N)C=C1")
+    if user_smiles:
+    mol = Chem.MolFromSmiles(user_smiles)
+    
+    if mol is not None:
+        st.subheader("Interactive 3D Geometry:")
+        
+        # Add Hydrogens and calculate 3D coordinates
+        mol = Chem.AddHs(mol)
+        AllChem.EmbedMolecule(mol, randomSeed=42)
+        AllChem.MMFFOptimizeMolecule(mol) # Optimizes the structure
+        
+        # Convert to a format the 3D viewer can read
+        mblock = Chem.MolToMolBlock(mol)
+        
+        # Set up the 3D viewer (spinning stick model)
+        viewer = py3Dmol.view(width=400, height=400)
+        viewer.addModel(mblock, "mol")
+        viewer.setStyle({'stick': {}})
+        viewer.zoomTo()
+        
+        # Render it in Streamlit
+        showmol(viewer, height=400, width=400)
+    else:
+        st.error("Invalid SMILES string. Please check your input.")
 
     if st.button("Predict Stability", type="primary"):
         torch.manual_seed(42)

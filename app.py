@@ -66,53 +66,86 @@ st.title("🧪 TEG Discovery & Training Studio")
 # made 3 tabs now instead of 2
 tab1, tab2, tab3 = st.tabs(["🧪 Predict Stability", "⚙️ Train the AI", "📁 Batch Screening"])
 
+
 # ==========================================
-# TAB 1: PREDICTION
+# TAB 1: PREDICTION & DISCOVERY STUDIO
 # ==========================================
 with tab1:
-    st.markdown("Enter the SMILES string of a hypothetical organic semiconductor.")
-    user_smiles = st.text_input("Enter Molecule SMILES:", "N#CC(C#N)=C1C=CC(=C(C#N)C#N)C=C1")
+    import urllib.parse
+    import requests
+    from rdkit.Chem import AllChem
+
+    st.markdown("Enter a SMILES string, or use the Mutator buttons to alter the chemistry.")
     
+    # --- UI STATE MANAGEMENT ---
+    # This allows the buttons to physically change the text inside the input box
+    if "smiles_input" not in st.session_state:
+        st.session_state.smiles_input = "N#CC(C#N)=C1C=CC(=C(C#N)C#N)C=C1"
+
+    # --- THE MOLECULE MUTATOR ENGINE ---
+    def run_mutation(rxn_smarts):
+        try:
+            mol = Chem.MolFromSmiles(st.session_state.smiles_input)
+            rxn = AllChem.ReactionFromSmarts(rxn_smarts)
+            # Run the reaction on the current molecule
+            products = rxn.RunReactants((mol,))
+            if products:
+                new_mol = products[0][0] # Grab the first generated variant
+                Chem.SanitizeMol(new_mol)
+                st.session_state.smiles_input = Chem.MolToSmiles(new_mol)
+        except:
+            pass # If the reaction fails (e.g. no valid attachment point), do nothing
+
+    col1, col2 = st.columns(2)
+    with col1:
+        # Reaction: Finds an aromatic Carbon-Hydrogen bond and replaces it with Carbon-Fluorine
+        if st.button("🧬 Mutate: Add Fluorine (-F)"):
+            run_mutation('[cH:1]>>[c:1](F)')
+    with col2:
+        # Reaction: Finds an aromatic Carbon-Hydrogen bond and replaces it with a Cyano group
+        if st.button("🧬 Mutate: Add Cyano (-C#N)"):
+            run_mutation('[cH:1]>>[c:1](C#N)')
+
+    # --- THE VISUALIZER ---
+    user_smiles = st.text_input("Current Molecule SMILES:", st.session_state.smiles_input)
+    
+    # Update memory if you type manually
+    if user_smiles != st.session_state.smiles_input:
+        st.session_state.smiles_input = user_smiles
+
     if user_smiles:
         mol = Chem.MolFromSmiles(user_smiles)
         
         if mol is not None:
             st.subheader("Interactive 3D Geometry:")
-            
-            # Add Hydrogens and calculate 3D coordinates
             mol = Chem.AddHs(mol)
             AllChem.EmbedMolecule(mol, randomSeed=42)
-            AllChem.MMFFOptimizeMolecule(mol) # Optimizes the structure
-            
-            # Convert to a format the 3D viewer can read
+            AllChem.MMFFOptimizeMolecule(mol)
             mblock = Chem.MolToMolBlock(mol)
-            
-            # Set up the 3D viewer (spinning stick model)
             viewer = py3Dmol.view(width=400, height=400)
             viewer.addModel(mblock, "mol")
             viewer.setStyle({'stick': {}, 'sphere': {'radius': 0.4}})
             viewer.zoomTo()
-            
-            # Render it in Streamlit
             showmol(viewer, height=400, width=400)
         else:
             st.error("Invalid SMILES string. Please check your input.")
 
-    if st.button("Predict Stability", type="primary"):
+    # --- THE AI & API PREDICTION ---
+    if st.button("Predict Stability & Search PubChem", type="primary"):
         torch.manual_seed(42)
         model.eval() 
         
-        with st.spinner("Calculating quantum spatial features..."):
+        with st.spinner("Calculating quantum features & pinging global databases..."):
             mol = Chem.MolFromSmiles(user_smiles)
             if not mol:
                 st.error("Invalid SMILES string.")
             else:
+                # 1. AI Prediction Logic
                 mol = Chem.AddHs(mol)
                 AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
                 AllChem.UFFOptimizeMolecule(mol, maxIters=1000)
                     
                 x = torch.tensor([get_unified_features(a) for a in mol.GetAtoms()], dtype=torch.float).to(device)
-                    
                 edges, dists = [], []
                 conf = mol.GetConformer()
                 for bond in mol.GetBonds():
@@ -129,7 +162,7 @@ with tab1:
                     scaled_pred = model(x, edge_index, edge_attr, batch).cpu().numpy()
                     predicted_ev = scaler.inverse_transform(scaled_pred)[0][0]
                 
-                st.subheader("AI Prediction Result")
+                st.subheader("🤖 AI Prediction Result")
                 st.metric(label="Predicted LUMO", value=f"{predicted_ev:.2f} eV")
                 
                 if predicted_ev <= -3.85:
@@ -139,6 +172,24 @@ with tab1:
                 else:
                     st.error("❌ UNSTABLE P-TYPE/DONOR.")
 
+                # 2. PubChem API Logic
+                st.subheader("🌐 PubChem Reality Check")
+                try:
+                    safe_smiles = urllib.parse.quote(user_smiles)
+                    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{safe_smiles}/property/Title,MolecularWeight/JSON"
+                    response = requests.get(url)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        props = data['PropertyTable']['Properties'][0]
+                        name = props.get('Title', 'Unnamed Compound')
+                        weight = props.get('MolecularWeight', 'Unknown')
+                        st.info(f"**Molecule Recognized!**\n\n**Common Name:** {name}\n\n**Mass:** {weight} g/mol")
+                    else:
+                        st.success("🌟 **Novel Molecule!** No matches found in the PubChem database. You just engineered this.")
+                except:
+                    st.warning("Could not connect to PubChem API.")
+            
 # ==========================================
 # TAB 2: THE TRAINING DASHBOARD
 # ==========================================

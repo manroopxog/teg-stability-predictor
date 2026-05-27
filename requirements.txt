@@ -5,3 +5,5 @@ rdkit
 scikit-learn
 pandas
 joblib
+py3Dmol
+stmol

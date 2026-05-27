@@ -176,19 +176,34 @@ with tab1:
                 st.subheader("🌐 PubChem Reality Check")
                 try:
                     safe_smiles = urllib.parse.quote(user_smiles)
-                    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{safe_smiles}/property/Title,MolecularWeight/JSON"
+                    # Fetching IUPAC Name, Mass, Formula, and XLogP (Toxicity proxy)
+                    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{safe_smiles}/property/IUPACName,MolecularWeight,MolecularFormula,XLogP/JSON"
                     response = requests.get(url)
                     
                     if response.status_code == 200:
                         data = response.json()
                         props = data['PropertyTable']['Properties'][0]
-                        name = props.get('Title', 'Unnamed Compound')
+                        
+                        # Extract data safely
+                        cid = props.get('CID', 'Unknown')
+                        name = props.get('IUPACName', 'Complex Derivative (No standard name available)')
                         weight = props.get('MolecularWeight', 'Unknown')
-                        st.info(f"**Molecule Recognized!**\n\n**Common Name:** {name}\n\n**Mass:** {weight} g/mol")
+                        formula = props.get('MolecularFormula', 'Unknown')
+                        xlogp = props.get('XLogP', 'Data not available')
+                        
+                        st.info(f"**✅ Molecule Recognized (PubChem CID: {cid})**\n\n"
+                                f"**Formula:** {formula}\n\n"
+                                f"**IUPAC Name:** {name}\n\n"
+                                f"**Mass:** {weight} g/mol\n\n"
+                                f"**XLogP (Toxicity/Bioaccumulation proxy):** {xlogp}")
+                        
+                    elif response.status_code == 404 or response.status_code == 400:
+                        st.success("🌟 **Novel Molecule!** No matches found in the PubChem database.")
                     else:
-                        st.success("🌟 **Novel Molecule!** No matches found in the PubChem database. You just engineered this.")
-                except:
-                    st.warning("Could not connect to PubChem API.")
+                        st.warning("Could not connect to PubChem API.")
+                except Exception as e:
+                    st.warning(f"API Error: {e}")
+                    
             
 # ==========================================
 # TAB 2: THE TRAINING DASHBOARD

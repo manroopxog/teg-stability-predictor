@@ -115,15 +115,18 @@ st.set_page_config(page_title="Model A | LUMO Screener", layout="wide")
 @st.cache_resource
 def load_assets():
     model = GATModel(num_node_features=10, hidden_channels=128)
-    model.load_state_dict(torch.load('Upgraded_n_type_expert (4).pth', map_location=torch.device('cpu')))
+    # Changed to lowercase 'u' to perfectly match your GitHub repo
+    model.load_state_dict(torch.load('upgraded_n_type_expert (4).pth', map_location=torch.device('cpu')))
     scaler = joblib.load('polymer_lumo_scaler.pkl')
     return model, scaler
 
 try:
     model, scaler = load_assets()
 except Exception as e:
-    st.error(f"Failed to load model or scaler. Ensure 'Upgraded_n_type_expert (4).pth' and 'polymer_lumo_scaler.pkl' are spelled perfectly in the code. Error: {e}")
+    # Changed to lowercase 'u' here as well
+    st.error(f"Failed to load model or scaler. Ensure 'upgraded_n_type_expert (4).pth' and 'polymer_lumo_scaler.pkl' are spelled perfectly in the code. Error: {e}")
     st.stop()
+    
 
 # ==========================================
 # 4. STREAMLIT UI & TABS
@@ -364,5 +367,5 @@ with tab3:
                 buffer = io.BytesIO()
                 torch.save(model.state_dict(), buffer)
                 buffer.seek(0)
-                st.download_button("💾 Download Updated Model Weights (.pth)", data=buffer, file_name="Upgraded_n_type_expert (4).pth", mime="application/octet-stream")
+                st.download_button("💾 Download Updated Model Weights (.pth)", data=buffer, file_name="upgraded_n_type_expert (4).pth", mime="application/octet-stream")
                 

@@ -104,19 +104,18 @@ st.set_page_config(page_title="Model A | OTE Deep LUMO", layout="wide")
 @st.cache_resource
 def load_assets():
     model = GATModel(num_node_features=11, edge_dim=1)
-    model.load_state_dict(torch.load('upgraded_n_type_expert (4).pth', map_location=torch.device('cpu')))
     
-    # Updated to match the (1) in your downloaded file exactly
+    # HARDWIRED FOR YOUR EXACT MOBILE DOWNLOAD NAMES
+    model.load_state_dict(torch.load('upgraded_n_type_expert (4).pth (1)', map_location=torch.device('cpu')))
     scaler = joblib.load('polymer_lumo_scaler (1).pkl')
+    
     return model, scaler
 
 try:
     model, scaler = load_assets()
 except Exception as e:
-    # Updated error message to match
-    st.error(f"Waiting for files... Please ensure 'upgraded_n_type_expert (4).pth' and 'polymer_lumo_scaler (1).pkl' are in your GitHub repo. System error: {e}")
+    st.error(f"Waiting for files... Please ensure 'upgraded_n_type_expert (4).pth (1)' and 'polymer_lumo_scaler (1).pkl' are in your GitHub repo. System error: {e}")
     st.stop()
-    
 
 # --- HEADER ---
 st.title("⚡ Model A: Deep LUMO Architecture")
@@ -273,4 +272,4 @@ with tab2:
                     st.write(f"**PubChem CID:** {pc_info['CID']}")
                     st.write(f"**Name:** {pc_info['Name']}")
                     st.write(f"**XLogP:** {pc_info['XLogP']}")
-    
+                                        

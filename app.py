@@ -17,67 +17,101 @@ import py3Dmol
 from stmol import showmol
 
 # ==========================================
-# 1. DEFINE THE GAT MODEL ARCHITECTURE
+# 1. DEFINE THE GAT MODEL ARCHITECTURE (REBUILT FOR MODEL A)
 # ==========================================
 class GATModel(torch.nn.Module):
-    def __init__(self, num_node_features, hidden_channels):
+    def __init__(self, num_node_features=11, hidden_channels=64, edge_dim=4, heads=2):
         super(GATModel, self).__init__()
-        self.conv1 = GATConv(num_node_features, hidden_channels, heads=4, concat=False)
-        self.conv2 = GATConv(hidden_channels, hidden_channels, heads=4, concat=False)
-        self.conv3 = GATConv(hidden_channels, hidden_channels, heads=6, concat=False)
+        # 4 Convolutional layers to match checkpoint state_dict
+        self.conv1 = GATConv(num_node_features, hidden_channels, heads=heads, edge_dim=edge_dim)
+        self.conv2 = GATConv(hidden_channels * heads, hidden_channels, heads=heads, edge_dim=edge_dim)
+        self.conv3 = GATConv(hidden_channels * heads, hidden_channels, heads=heads, edge_dim=edge_dim)
+        self.conv4 = GATConv(hidden_channels * heads, hidden_channels, heads=heads, edge_dim=edge_dim)
         
-        self.lin1 = torch.nn.Linear(hidden_channels, hidden_channels)
-        self.lin2 = torch.nn.Linear(hidden_channels, 1)
+        # MLPs mapping to the linear1 and linear2 checkpoint keys
+        self.linear1 = torch.nn.Linear(hidden_channels * heads, hidden_channels * heads)
+        self.linear2 = torch.nn.Linear(hidden_channels * heads, 1)
 
-    def forward(self, x, edge_index, batch):
-        x = self.conv1(x, edge_index)
+    def forward(self, x, edge_index, batch, edge_attr=None):
+        x = self.conv1(x, edge_index, edge_attr=edge_attr)
         x = F.elu(x)
-        x = self.conv2(x, edge_index)
+        x = self.conv2(x, edge_index, edge_attr=edge_attr)
         x = F.elu(x)
-        x = self.conv3(x, edge_index)
+        x = self.conv3(x, edge_index, edge_attr=edge_attr)
         x = F.elu(x)
+        x = self.conv4(x, edge_index, edge_attr=edge_attr)
+        x = F.elu(x)
+        
         x = global_mean_pool(x, batch)
-        x = self.lin1(x)
+        
+        x = self.linear1(x)
         x = F.elu(x)
-        x = self.lin2(x)
+        x = self.linear2(x)
         return x
 
 # ==========================================
-# 2. FEATURIZER & TOXICITY FILTERS
+# 2. FEATURIZER & TOXICITY FILTERS (UPDATED FOR EDGE FEATURES)
 # ==========================================
 def get_node_features(atom):
     features = []
     atomic_num = atom.GetAtomicNum()
-    features += [int(atomic_num == i) for i in [6, 7, 8, 16, 9]]
+    # 5 features
+    features += [float(atomic_num == i) for i in [6, 7, 8, 16, 9]]
+    
+    # 3 features
     hybridization = atom.GetHybridization()
     features += [
-        int(hybridization == Chem.rdchem.HybridizationType.SP),
-        int(hybridization == Chem.rdchem.HybridizationType.SP2),
-        int(hybridization == Chem.rdchem.HybridizationType.SP3)
+        float(hybridization == Chem.rdchem.HybridizationType.SP),
+        float(hybridization == Chem.rdchem.HybridizationType.SP2),
+        float(hybridization == Chem.rdchem.HybridizationType.SP3)
     ]
-    features.append(int(atom.GetIsAromatic()))
+    
+    # 3 features (Aromaticity, Charge, Hydrogen Count)
+    features.append(float(atom.GetIsAromatic()))
     features.append(float(atom.GetFormalCharge()))
+    features.append(float(atom.GetTotalNumHs())) # The missing 11th feature required by checkpoint
+    
     return features
+
+def get_edge_features(bond):
+    bt = bond.GetBondType()
+    return [
+        float(bt == Chem.rdchem.BondType.SINGLE),
+        float(bt == Chem.rdchem.BondType.DOUBLE),
+        float(bt == Chem.rdchem.BondType.TRIPLE),
+        float(bt == Chem.rdchem.BondType.AROMATIC)
+    ]
 
 def smiles_to_graph(smiles, target_val=None):
     mol = Chem.MolFromSmiles(str(smiles))
     if mol is None: return None
+    
+    # Node features
     node_features = [get_node_features(atom) for atom in mol.GetAtoms()]
     x = torch.tensor(node_features, dtype=torch.float)
+    
+    # Edge features
     edges = []
+    edge_attrs = []
     for bond in mol.GetBonds():
         i = bond.GetBeginAtomIdx()
         j = bond.GetEndAtomIdx()
         edges.extend([[i, j], [j, i]])
+        
+        e_feat = get_edge_features(bond)
+        edge_attrs.extend([e_feat, e_feat])
+        
     if not edges:
         edge_index = torch.empty((2, 0), dtype=torch.long)
+        edge_attr = torch.empty((0, 4), dtype=torch.float)
     else:
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+        edge_attr = torch.tensor(edge_attrs, dtype=torch.float)
     
     if target_val is not None:
         y = torch.tensor([[target_val]], dtype=torch.float)
-        return Data(x=x, edge_index=edge_index, y=y)
-    return Data(x=x, edge_index=edge_index)
+        return Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
+    return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
 
 # Setup PAINS Toxicity Filter
 params = FilterCatalog.FilterCatalogParams()
@@ -108,14 +142,14 @@ def get_pubchem_data(smiles):
         return {"CID": "API Error", "Name": "N/A", "Mass": "N/A", "XLogP": "N/A"}
 
 # ==========================================
-# 3. LOAD ASSETS (MATCHING GITHUB REPO)
+# 3. LOAD ASSETS 
 # ==========================================
 st.set_page_config(page_title="Model A | LUMO Screener", layout="wide")
 
 @st.cache_resource
 def load_assets():
-    model = GATModel(num_node_features=10, hidden_channels=128)
-    # Changed to lowercase 'u' to perfectly match your GitHub repo
+    # Architecture matches the rebuilt class above
+    model = GATModel(num_node_features=11, hidden_channels=64, edge_dim=4, heads=2)
     model.load_state_dict(torch.load('upgraded_n_type_expert (4).pth', map_location=torch.device('cpu')))
     scaler = joblib.load('polymer_lumo_scaler.pkl')
     return model, scaler
@@ -123,10 +157,8 @@ def load_assets():
 try:
     model, scaler = load_assets()
 except Exception as e:
-    # Changed to lowercase 'u' here as well
-    st.error(f"Failed to load model or scaler. Ensure 'upgraded_n_type_expert (4).pth' and 'polymer_lumo_scaler.pkl' are spelled perfectly in the code. Error: {e}")
+    st.error(f"Failed to load model or scaler. Ensure files exist. Error: {e}")
     st.stop()
-    
 
 # ==========================================
 # 4. STREAMLIT UI & TABS
@@ -170,13 +202,17 @@ with tab1:
             mol = Chem.AddHs(mol)
             AllChem.EmbedMolecule(mol, randomSeed=42)
             
-            ff_pre = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol))
-            e_pre = ff_pre.CalcEnergy() if ff_pre else 0.0
-            
-            AllChem.MMFFOptimizeMolecule(mol)
-            
-            ff_post = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol))
-            e_post = ff_post.CalcEnergy() if ff_post else 0.0
+            # Using UFF for cloud safety
+            try:
+                ff_pre = AllChem.UFFGetMoleculeForceField(mol)
+                e_pre = ff_pre.CalcEnergy() if ff_pre else 0.0
+                
+                AllChem.UFFOptimizeMolecule(mol)
+                
+                ff_post = AllChem.UFFGetMoleculeForceField(mol)
+                e_post = ff_post.CalcEnergy() if ff_post else 0.0
+            except:
+                e_pre, e_post = 0.0, 0.0
             
             col_viz, col_metrics = st.columns([1, 1])
             
@@ -210,7 +246,8 @@ with tab1:
             batch = torch.zeros(graph.x.shape[0], dtype=torch.long)
             
             with torch.no_grad():
-                scaled_pred = model(graph.x, graph.edge_index, batch).numpy()
+                # edge_attr passed correctly to model
+                scaled_pred = model(graph.x, graph.edge_index, batch, edge_attr=graph.edge_attr).numpy()
                 predicted_ev = scaler.inverse_transform(scaled_pred)[0][0]
             
             st.subheader("🤖 AI Prediction Result")
@@ -253,7 +290,7 @@ with tab2:
                     if graph is not None:
                         batch = torch.zeros(graph.x.shape[0], dtype=torch.long)
                         with torch.no_grad():
-                            scaled_pred = model(graph.x, graph.edge_index, batch).numpy()
+                            scaled_pred = model(graph.x, graph.edge_index, batch, edge_attr=graph.edge_attr).numpy()
                         real_val = scaler.inverse_transform(scaled_pred)[0][0]
                         preds.append(round(real_val, 4))
                     else:
@@ -286,7 +323,12 @@ with tab2:
                     i_mol = Chem.MolFromSmiles(inspect_smiles.strip())
                     i_mol = Chem.AddHs(i_mol)
                     AllChem.EmbedMolecule(i_mol, randomSeed=42)
-                    AllChem.MMFFOptimizeMolecule(i_mol)
+                    
+                    try:
+                        AllChem.UFFOptimizeMolecule(i_mol)
+                    except:
+                        pass
+                        
                     i_mblock = Chem.MolToMolBlock(i_mol)
                     viewer2 = py3Dmol.view(width=350, height=350)
                     viewer2.addModel(i_mblock, "mol")
@@ -352,7 +394,8 @@ with tab3:
                     total_loss = 0
                     for data in loader:
                         optimizer.zero_grad()
-                        out = model(data.x, data.edge_index, data.batch)
+                        # Edge attr included in the fine-tuning loop
+                        out = model(data.x, data.edge_index, data.batch, edge_attr=data.edge_attr)
                         loss = criterion(out, data.y)
                         loss.backward()
                         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -368,4 +411,4 @@ with tab3:
                 torch.save(model.state_dict(), buffer)
                 buffer.seek(0)
                 st.download_button("💾 Download Updated Model Weights (.pth)", data=buffer, file_name="upgraded_n_type_expert (4).pth", mime="application/octet-stream")
-                
+    

@@ -17,20 +17,27 @@ import py3Dmol
 from stmol import showmol
 
 # ==========================================
-# 1. DEFINE THE GAT MODEL ARCHITECTURE (REBUILT FOR MODEL A)
+# 1. DEFINE THE GAT MODEL ARCHITECTURE (PERFECTLY MATCHED TO MODEL A)
 # ==========================================
 class GATModel(torch.nn.Module):
-    def __init__(self, num_node_features=11, hidden_channels=64, edge_dim=4, heads=2):
+    def __init__(self, num_node_features=11, edge_dim=1):
         super(GATModel, self).__init__()
-        # 4 Convolutional layers to match checkpoint state_dict
-        self.conv1 = GATConv(num_node_features, hidden_channels, heads=heads, edge_dim=edge_dim)
-        self.conv2 = GATConv(hidden_channels * heads, hidden_channels, heads=heads, edge_dim=edge_dim)
-        self.conv3 = GATConv(hidden_channels * heads, hidden_channels, heads=heads, edge_dim=edge_dim)
-        self.conv4 = GATConv(hidden_channels * heads, hidden_channels, heads=heads, edge_dim=edge_dim)
         
-        # MLPs mapping to the linear1 and linear2 checkpoint keys
-        self.linear1 = torch.nn.Linear(hidden_channels * heads, hidden_channels * heads)
-        self.linear2 = torch.nn.Linear(hidden_channels * heads, 1)
+        # Layer 1: 11 in -> 64 out, 2 heads, concat=True (Output = 128)
+        self.conv1 = GATConv(num_node_features, 64, heads=2, concat=True, edge_dim=edge_dim)
+        
+        # Layer 2: 128 in -> 64 out, 2 heads, concat=True (Output = 128)
+        self.conv2 = GATConv(128, 64, heads=2, concat=True, edge_dim=edge_dim)
+        
+        # Layer 3: 128 in -> 64 out, 2 heads, concat=True (Output = 128)
+        self.conv3 = GATConv(128, 64, heads=2, concat=True, edge_dim=edge_dim)
+        
+        # Layer 4: 128 in -> 64 out, 1 head, concat=False (Output = 64)
+        self.conv4 = GATConv(128, 64, heads=1, concat=False, edge_dim=edge_dim)
+        
+        # MLPs matching checkpoint funnels (64 -> 32 -> 1)
+        self.linear1 = torch.nn.Linear(64, 32)
+        self.linear2 = torch.nn.Linear(32, 1)
 
     def forward(self, x, edge_index, batch, edge_attr=None):
         x = self.conv1(x, edge_index, edge_attr=edge_attr)
@@ -50,7 +57,7 @@ class GATModel(torch.nn.Module):
         return x
 
 # ==========================================
-# 2. FEATURIZER & TOXICITY FILTERS (UPDATED FOR EDGE FEATURES)
+# 2. FEATURIZER & TOXICITY FILTERS (UPDATED FOR 1D EDGE)
 # ==========================================
 def get_node_features(atom):
     features = []
@@ -69,18 +76,22 @@ def get_node_features(atom):
     # 3 features (Aromaticity, Charge, Hydrogen Count)
     features.append(float(atom.GetIsAromatic()))
     features.append(float(atom.GetFormalCharge()))
-    features.append(float(atom.GetTotalNumHs())) # The missing 11th feature required by checkpoint
+    features.append(float(atom.GetTotalNumHs()))
     
     return features
 
 def get_edge_features(bond):
+    # Condensing bond type into a 1D float as required by the checkpoint
     bt = bond.GetBondType()
-    return [
-        float(bt == Chem.rdchem.BondType.SINGLE),
-        float(bt == Chem.rdchem.BondType.DOUBLE),
-        float(bt == Chem.rdchem.BondType.TRIPLE),
-        float(bt == Chem.rdchem.BondType.AROMATIC)
-    ]
+    if bt == Chem.rdchem.BondType.SINGLE:
+        return [1.0]
+    elif bt == Chem.rdchem.BondType.DOUBLE:
+        return [2.0]
+    elif bt == Chem.rdchem.BondType.TRIPLE:
+        return [3.0]
+    elif bt == Chem.rdchem.BondType.AROMATIC:
+        return [1.5]
+    return [1.0]
 
 def smiles_to_graph(smiles, target_val=None):
     mol = Chem.MolFromSmiles(str(smiles))
@@ -103,7 +114,7 @@ def smiles_to_graph(smiles, target_val=None):
         
     if not edges:
         edge_index = torch.empty((2, 0), dtype=torch.long)
-        edge_attr = torch.empty((0, 4), dtype=torch.float)
+        edge_attr = torch.empty((0, 1), dtype=torch.float)
     else:
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
         edge_attr = torch.tensor(edge_attrs, dtype=torch.float)
@@ -148,8 +159,7 @@ st.set_page_config(page_title="Model A | LUMO Screener", layout="wide")
 
 @st.cache_resource
 def load_assets():
-    # Architecture matches the rebuilt class above
-    model = GATModel(num_node_features=11, hidden_channels=64, edge_dim=4, heads=2)
+    model = GATModel(num_node_features=11, edge_dim=1)
     model.load_state_dict(torch.load('upgraded_n_type_expert (4).pth', map_location=torch.device('cpu')))
     scaler = joblib.load('polymer_lumo_scaler.pkl')
     return model, scaler
@@ -202,7 +212,6 @@ with tab1:
             mol = Chem.AddHs(mol)
             AllChem.EmbedMolecule(mol, randomSeed=42)
             
-            # Using UFF for cloud safety
             try:
                 ff_pre = AllChem.UFFGetMoleculeForceField(mol)
                 e_pre = ff_pre.CalcEnergy() if ff_pre else 0.0
@@ -246,7 +255,6 @@ with tab1:
             batch = torch.zeros(graph.x.shape[0], dtype=torch.long)
             
             with torch.no_grad():
-                # edge_attr passed correctly to model
                 scaled_pred = model(graph.x, graph.edge_index, batch, edge_attr=graph.edge_attr).numpy()
                 predicted_ev = scaler.inverse_transform(scaled_pred)[0][0]
             
@@ -394,7 +402,6 @@ with tab3:
                     total_loss = 0
                     for data in loader:
                         optimizer.zero_grad()
-                        # Edge attr included in the fine-tuning loop
                         out = model(data.x, data.edge_index, data.batch, edge_attr=data.edge_attr)
                         loss = criterion(out, data.y)
                         loss.backward()
@@ -411,4 +418,4 @@ with tab3:
                 torch.save(model.state_dict(), buffer)
                 buffer.seek(0)
                 st.download_button("💾 Download Updated Model Weights (.pth)", data=buffer, file_name="upgraded_n_type_expert (4).pth", mime="application/octet-stream")
-    
+        

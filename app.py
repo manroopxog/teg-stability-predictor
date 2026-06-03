@@ -109,14 +109,14 @@ st.set_page_config(page_title="Model A | OTE Deep LUMO Dashboard", layout="wide"
 @st.cache_resource
 def load_assets():
     model = GATModel(num_node_features=11, edge_dim=1)
-    model.load_state_dict(torch.load('upgraded_n_type_expert (4).pth (1)', map_location=torch.device('cpu')))
+    model.load_state_dict(torch.load('upgraded_n_type_expert (4) (2).pth (1)', map_location=torch.device('cpu')))
     scaler = joblib.load('polymer_lumo_scaler (1).pkl')
     return model, scaler
 
 try:
     model, scaler = load_assets()
 except Exception as e:
-    st.error(f"⚠️ Initialization Error: Ensure 'upgraded_n_type_expert (4).pth (1)' and 'polymer_lumo_scaler (1).pkl' are in your GitHub repo. Details: {e}")
+    st.error(f"⚠️ Initialization Error: Ensure 'upgraded_n_type_expert (4) (2).pth (1)' and 'polymer_lumo_scaler (1).pkl' are in your GitHub repo. Details: {e}")
     st.stop()
 
 # --- HEADER DISPLAY ---

@@ -92,9 +92,26 @@ def extract_spectral_signatures(smiles):
     if num_atoms < 2: return [0.0, 0.0, 0.0]
     
     A = np.zeros((num_atoms, num_atoms))
+    
+    # Coulomb Integrals (Electronegativity)
+    h_params = {6: 0.0, 7: 1.0, 8: 1.2, 9: 3.0, 16: 0.0}
+    for i, atom in enumerate(mol.GetAtoms()):
+        A[i, i] = h_params.get(atom.GetAtomicNum(), 0.0)
+        
+    # Resonance Integrals (Bond Overlap)
     for bond in mol.GetBonds():
         i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-        A[i, j] = A[j, i] = bond.GetBondTypeAsDouble()
+        bond_order = bond.GetBondTypeAsDouble()
+        
+        atom_i, atom_j = mol.GetAtomWithIdx(i).GetAtomicNum(), mol.GetAtomWithIdx(j).GetAtomicNum()
+        k_mod = 1.0
+        if 9 in (atom_i, atom_j): k_mod = 0.7
+        elif 16 in (atom_i, atom_j): k_mod = 0.6
+        elif 8 in (atom_i, atom_j): k_mod = 0.8
+        
+        val = bond_order * k_mod
+        A[i, j] = val
+        A[j, i] = val
         
     try:
         w, v = eigh(A)
@@ -106,6 +123,7 @@ def extract_spectral_signatures(smiles):
         wave_localization = np.var(v[:, mid]) if len(w) > 1 else 0
         return [spectral_radius / 5.0, spectral_gap / 5.0, wave_localization * 10.0]
     except: return [0.0, 0.0, 0.0]
+
 
 def get_model_a_node_features(atom):
     features = [float(atom.GetAtomicNum() == i) for i in [6, 7, 8, 16, 9]]

@@ -257,8 +257,10 @@ with tab1:
                         else: st.warning("🧱 Lower Mobility: High structural distortion upon charging.")
 
             with st.container(border=True):
+                st.subheader("🌐 PubChem Database Cross-Reference")
                 pc = get_pubchem_data(smiles)
-                st.markdown(f"**PubChem CID:** `{pc['CID']}` | **IUPAC:** `{pc['Name']}`")
+                st.markdown(f"**Compound CID:** `{pc['CID']}` | **IUPAC Name:** `{pc['Name']}` | **XLogP:** `{pc['XLogP']}`")
+
 
     with col_viz:
         if mol:
@@ -337,4 +339,34 @@ with tab2:
             res_df = st.session_state.batch_df
             st.dataframe(res_df, use_container_width=True)
             st.download_button("📥 Export Screened Data", res_df.to_csv(index=False).encode('utf-8'), "screened_muteg.csv", "text/csv")
+            st.markdown("---")
+            with st.container(border=True):
+                st.subheader("🔍 Real-Time Compound Inspector")
+                valid_smiles = [s for s in res_df[smiles_col] if type(s) == str and Chem.MolFromSmiles(s.strip()) is not None]
+                
+                if valid_smiles:
+                    inspect_smiles = st.selectbox("Select Target Compound from Screened Batch:", valid_smiles)
+                    
+                    b_col1, b_col2 = st.columns(2)
+                    with b_col1:
+                        i_mol = Chem.MolFromSmiles(inspect_smiles.strip())
+                        i_mol = Chem.AddHs(i_mol)
+                        AllChem.EmbedMolecule(i_mol, randomSeed=42)
+                        try: AllChem.UFFOptimizeMolecule(i_mol)
+                        except: pass
+                            
+                        viewer2 = py3Dmol.view(width=450, height=350)
+                        viewer2.addModel(Chem.MolToMolBlock(i_mol), "mol")
+                        viewer2.setStyle({'stick': {}})
+                        viewer2.addSurface(py3Dmol.VDW, {'opacity': 0.5, 'colorscheme': 'cyanCarbon'})
+                        viewer2.zoomTo()
+                        showmol(viewer2, height=350, width=450)
+                    
+                    with b_col2:
+                        pc_info = get_pubchem_data(inspect_smiles.strip())
+                        st.markdown(f"**Structural Format:** `{inspect_smiles}`")
+                        st.markdown(f"**PubChem CID Link:** `{pc_info['CID']}`")
+                        st.markdown(f"**Systematic Title Name:** {pc_info['Name']}")
+                        st.markdown(f"**Calculated XLogP Parameter:** `{pc_info['XLogP']}`")
+                        
     

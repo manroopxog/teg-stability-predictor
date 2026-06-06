@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import GATConv, global_mean_pool
 from torch_geometric.data import Data
 from rdkit import Chem
-from rdkit.Chem import AllChem, FilterCatalog, DataStructs
+from rdkit.Chem import AllChem, FilterCatalog, DataStructs, rdFingerprintGenerator
 import joblib
 import numpy as np
 import pandas as pd
@@ -91,22 +91,27 @@ def get_pubchem_data(smiles):
     except: pass
     return {"CID": "N/A", "Name": "N/A", "XLogP": "N/A"}
 
+# ---------------------------------------------------------
+# RDKIT 2023+ UPDATE: USING MORGAN GENERATOR
+# ---------------------------------------------------------
 @st.cache_data
 def load_training_fingerprints():
     try:
         df_ref = pd.read_csv('training_smiles.csv')
         fps = []
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
         for s in df_ref['smiles']:
             m = Chem.MolFromSmiles(str(s))
-            if m: fps.append(AllChem.GetMorganFingerprintAsBitVect(m, 2, nBits=2048))
+            if m: fps.append(mfpgen.GetFingerprint(m))
         return fps
     except: return []
 
 def calculate_tanimoto_domain(target_smiles, train_fps):
-    if not train_fps: return 1.0 # Skip if data missing
+    if not train_fps: return 1.0 
     mol = Chem.MolFromSmiles(target_smiles)
     if not mol: return 0.0
-    target_fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+    mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+    target_fp = mfpgen.GetFingerprint(mol)
     sims = DataStructs.BulkTanimotoSimilarity(target_fp, train_fps)
     return max(sims)
 
@@ -156,7 +161,6 @@ with tab1:
             mol = Chem.MolFromSmiles(smiles) if smiles else None
 
         if mol:
-            # Domain of Applicability Checker
             max_sim = calculate_tanimoto_domain(smiles, training_fps)
             if max_sim < 0.45:
                 st.warning(f"⚠️ **Domain of Applicability Alert:** Tanimoto Similarity is {max_sim:.2f}. This molecule is highly unusual compared to the training data. Prediction uncertainty is high.")
@@ -291,4 +295,4 @@ with tab2:
                         st.markdown(f"**PubChem CID Link:** `{pc_info['CID']}`")
                         st.markdown(f"**Systematic Title Name:** {pc_info['Name']}")
                         st.markdown(f"**Calculated XLogP Parameter:** `{pc_info['XLogP']}`")
-        
+                        

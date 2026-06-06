@@ -23,13 +23,17 @@ Model A is a high-throughput, AI-driven computational chemistry suite designed t
 
 If you wish to run the model architecture locally:
 
-```bash
-# Clone the repository
-git clone [https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git)
-cd YOUR_REPO_NAME
+    # Clone the repository
+    git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+    cd YOUR_REPO_NAME
 
-# Install required dependencies
-pip install torch torch-geometric rdkit streamlit pandas numpy joblib py3Dmol stmol requests
+    # Install required dependencies
+    pip install torch torch-geometric rdkit streamlit pandas numpy joblib py3Dmol stmol requests
 
-# Launch the Streamlit Dashboard
-streamlit run app.py
+    # Launch the Streamlit Dashboard
+    streamlit run app.py
+
+## 🧠 Model Weights
+The repository contains the pre-trained weights (`solvent_aware_model.pth`) and their respective scalers (`lumo_scaler.pkl` & `solvent_scaler.pkl`). These files must remain in the root directory for the app to initialize the inference pipeline.
+
+---

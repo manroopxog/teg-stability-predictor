@@ -12,9 +12,10 @@ import urllib.parse
 import requests
 import py3Dmol
 from stmol import showmol
+from scipy.linalg import eigh
 
 # ==========================================
-# 1. SOLVENT-AWARE ARCHITECTURE
+# 1. THE DUAL ARCHITECTURES
 # ==========================================
 class SolventAwareGAT(torch.nn.Module):
     def __init__(self, num_node_features=11, edge_dim=1, num_solvent_features=2):
@@ -36,34 +37,27 @@ class SolventAwareGAT(torch.nn.Module):
         out = F.elu(self.linear1(combined))
         return self.linear2(out)
 
-def get_node_features(atom):
-    features = [float(atom.GetAtomicNum() == i) for i in [6, 7, 8, 16, 9]]
-    hyb = atom.GetHybridization()
-    features += [float(hyb == Chem.rdchem.HybridizationType.SP), float(hyb == Chem.rdchem.HybridizationType.SP2), float(hyb == Chem.rdchem.HybridizationType.SP3)]
-    features.extend([float(atom.GetIsAromatic()), float(atom.GetFormalCharge()), float(atom.GetTotalNumHs())])
-    return features
+class SpectralSpatialGAT(torch.nn.Module):
+    def __init__(self, num_node_features=6, num_spectral_features=3):
+        super(SpectralSpatialGAT, self).__init__()
+        self.conv1 = GATConv(num_node_features, 64, heads=2, concat=True)
+        self.conv2 = GATConv(128, 64, heads=2, concat=True)
+        self.conv3 = GATConv(128, 64, heads=1, concat=False)
+        self.linear1 = torch.nn.Linear(64 + num_spectral_features, 32)
+        self.linear2 = torch.nn.Linear(32, 1)
 
-def get_edge_features(bond):
-    bt = bond.GetBondType()
-    val = 2.0 if bt == Chem.rdchem.BondType.DOUBLE else 3.0 if bt == Chem.rdchem.BondType.TRIPLE else 1.5 if bt == Chem.rdchem.BondType.AROMATIC else 1.0
-    return [val]
-
-def smiles_to_graph(smiles):
-    mol = Chem.MolFromSmiles(str(smiles))
-    if mol is None: return None
-    x = torch.tensor([get_node_features(a) for a in mol.GetAtoms()], dtype=torch.float)
-    edges, edge_attrs = [], []
-    for bond in mol.GetBonds():
-        i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-        edges.extend([[i, j], [j, i]])
-        e_feat = get_edge_features(bond)
-        edge_attrs.extend([e_feat, e_feat])
-    edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous() if edges else torch.empty((2, 0), dtype=torch.long)
-    edge_attr = torch.tensor(edge_attrs, dtype=torch.float) if edges else torch.empty((0, 1), dtype=torch.float)
-    return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+    def forward(self, data):
+        x, edge_index, batch, spectral = data.x, data.edge_index, data.batch, data.spectral
+        x = F.elu(self.conv1(x, edge_index))
+        x = F.elu(self.conv2(x, edge_index))
+        x = F.elu(self.conv3(x, edge_index))
+        mol_embedding = global_mean_pool(x, batch)
+        combined = torch.cat([mol_embedding, spectral], dim=1)
+        out = F.elu(self.linear1(combined))
+        return self.linear2(out)
 
 # ==========================================
-# 2. UTILS, TANIMOTO SIMILARITY & PUBCHEM
+# 2. MATH ENGINES & UTILS
 # ==========================================
 SOLVENTS = {
     "Vacuum (Gas Phase)": [1.0, 0.0],
@@ -91,9 +85,66 @@ def get_pubchem_data(smiles):
     except: pass
     return {"CID": "N/A", "Name": "N/A", "XLogP": "N/A"}
 
-# ---------------------------------------------------------
-# RDKIT 2023+ UPDATE: USING MORGAN GENERATOR
-# ---------------------------------------------------------
+def extract_spectral_signatures(smiles):
+    mol = Chem.MolFromSmiles(str(smiles))
+    if not mol: return [0.0, 0.0, 0.0]
+    num_atoms = mol.GetNumAtoms()
+    if num_atoms < 2: return [0.0, 0.0, 0.0]
+    
+    A = np.zeros((num_atoms, num_atoms))
+    for bond in mol.GetBonds():
+        i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        A[i, j] = A[j, i] = bond.GetBondTypeAsDouble()
+        
+    try:
+        w, v = eigh(A)
+        idx = w.argsort()
+        w, v = w[idx], v[:, idx]
+        spectral_radius = np.max(np.abs(w))
+        mid = len(w) // 2
+        spectral_gap = w[mid] - w[mid - 1] if len(w) > 1 else 0
+        wave_localization = np.var(v[:, mid]) if len(w) > 1 else 0
+        return [spectral_radius / 5.0, spectral_gap / 5.0, wave_localization * 10.0]
+    except: return [0.0, 0.0, 0.0]
+
+def get_model_a_node_features(atom):
+    features = [float(atom.GetAtomicNum() == i) for i in [6, 7, 8, 16, 9]]
+    hyb = atom.GetHybridization()
+    features += [float(hyb == Chem.rdchem.HybridizationType.SP), float(hyb == Chem.rdchem.HybridizationType.SP2), float(hyb == Chem.rdchem.HybridizationType.SP3)]
+    features.extend([float(atom.GetIsAromatic()), float(atom.GetFormalCharge()), float(atom.GetTotalNumHs())])
+    return features
+
+def get_model_b_node_features(atom):
+    return [float(atom.GetAtomicNum() == i) for i in [6, 7, 8, 16, 9]] + [float(atom.GetIsAromatic())]
+
+def get_edge_features(bond):
+    bt = bond.GetBondType()
+    val = 2.0 if bt == Chem.rdchem.BondType.DOUBLE else 3.0 if bt == Chem.rdchem.BondType.TRIPLE else 1.5 if bt == Chem.rdchem.BondType.AROMATIC else 1.0
+    return [val]
+
+def smiles_to_graphs(smiles):
+    mol = Chem.MolFromSmiles(str(smiles))
+    if mol is None: return None, None
+    
+    # Model A Graph
+    x_a = torch.tensor([get_model_a_node_features(a) for a in mol.GetAtoms()], dtype=torch.float)
+    edges, edge_attrs = [], []
+    for bond in mol.GetBonds():
+        i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        edges.extend([[i, j], [j, i]])
+        e_feat = get_edge_features(bond)
+        edge_attrs.extend([e_feat, e_feat])
+    edge_index_a = torch.tensor(edges, dtype=torch.long).t().contiguous() if edges else torch.empty((2, 0), dtype=torch.long)
+    edge_attr_a = torch.tensor(edge_attrs, dtype=torch.float) if edges else torch.empty((0, 1), dtype=torch.float)
+    graph_a = Data(x=x_a, edge_index=edge_index_a, edge_attr=edge_attr_a)
+
+    # Model B Graph
+    x_b = torch.tensor([get_model_b_node_features(a) for a in mol.GetAtoms()], dtype=torch.float)
+    spectral_feats = torch.tensor([extract_spectral_signatures(smiles)], dtype=torch.float)
+    graph_b = Data(x=x_b, edge_index=edge_index_a, spectral=spectral_feats) if torch.sum(spectral_feats) != 0 else None
+
+    return graph_a, graph_b
+
 @st.cache_data
 def load_training_fingerprints():
     try:
@@ -116,27 +167,34 @@ def calculate_tanimoto_domain(target_smiles, train_fps):
     return max(sims)
 
 # ==========================================
-# 3. STREAMLIT UI SETUP
+# 3. STREAMLIT UI & ASSET LOADING
 # ==========================================
-st.set_page_config(page_title="Solvent-Aware LUMO Screener", layout="wide")
+st.set_page_config(page_title="Indigenous μ-TEG Screening Suite", layout="wide")
 
 @st.cache_resource
 def load_assets():
-    m = SolventAwareGAT()
-    m.load_state_dict(torch.load('solvent_aware_model.pth', map_location='cpu'))
+    # Load Model A (Thermodynamics)
+    m_a = SolventAwareGAT()
+    m_a.load_state_dict(torch.load('solvent_aware_model.pth', map_location='cpu'))
     l_scaler = joblib.load('lumo_scaler.pkl')
     s_scaler = joblib.load('solvent_scaler.pkl')
-    return m, l_scaler, s_scaler
+    
+    # Load Model B (Kinetics / Mobility)
+    m_b = SpectralSpatialGAT()
+    m_b.load_state_dict(torch.load('model_b_reorg_engine.pth', map_location='cpu'))
+    r_scaler = joblib.load('reorg_scaler.pkl')
+    
+    return m_a, l_scaler, s_scaler, m_b, r_scaler
 
 try:
-    model, lumo_scaler, solvent_scaler = load_assets()
+    model_A, lumo_scaler, solvent_scaler, model_B, reorg_scaler = load_assets()
     training_fps = load_training_fingerprints()
 except Exception as e:
-    st.error(f"⚠️ Initialization Error. Details: {e}")
+    st.error(f"⚠️ Initialization Error. Are all 6 model/scaler files in GitHub? Details: {e}")
     st.stop()
 
-st.title("🌊 Model A: Solvent-Aware Deep LUMO Suite")
-st.markdown("Predicts highly accurate ambient air stability for n-type organic semiconductors by dynamically calculating solvation energy shifts.")
+st.title("⚡ Indigenous μ-TEG Discovery Suite")
+st.markdown("Dual-engine AI pipeline screening n-type organic semiconductors for ambient stability (LUMO) and charge carrier mobility (Reorganization Energy).")
 
 tab1, tab2 = st.tabs(["🎯 Single Molecule Studio", "📑 High-Throughput Batch Pipeline"])
 
@@ -146,9 +204,8 @@ with tab1:
     
     with col_input:
         with st.container(border=True):
-            st.subheader("🧪 Chemical Environment")
-            sol_choice = st.selectbox("Select Target Solvent Environment:", list(SOLVENTS.keys()) + ["Custom Solvent"])
-            
+            st.subheader("🧪 Doping Environment")
+            sol_choice = st.selectbox("Select Target Solvent/Environment:", list(SOLVENTS.keys()) + ["Custom Solvent"])
             if sol_choice == "Custom Solvent":
                 diel = st.number_input("Dielectric Constant", value=10.0)
                 dip = st.number_input("Dipole Moment", value=2.0)
@@ -156,46 +213,60 @@ with tab1:
                 diel, dip = SOLVENTS[sol_choice]
 
         with st.container(border=True):
-            st.subheader("🛠️ Molecular Structure")
+            st.subheader("🛠️ μ-TEG Core Structure")
             smiles = st.text_input("Target Chemical Structure (SMILES):", value="N#CC(C#N)=Cc1ccsc1").strip()
             mol = Chem.MolFromSmiles(smiles) if smiles else None
 
         if mol:
             max_sim = calculate_tanimoto_domain(smiles, training_fps)
             if max_sim < 0.45:
-                st.warning(f"⚠️ **Domain of Applicability Alert:** Tanimoto Similarity is {max_sim:.2f}. This molecule is highly unusual compared to the training data. Prediction uncertainty is high.")
+                st.warning(f"⚠️ **Domain of Applicability Alert:** Tanimoto Similarity is {max_sim:.2f}. Molecule is out-of-distribution.")
 
             with st.container(border=True):
-                st.subheader("🤖 Solvent-Aware Prediction")
-                with st.spinner("Calculating physical solvation shifts..."):
-                    model.eval()
-                    graph = smiles_to_graph(smiles)
-                    if graph is not None:
-                        batch = torch.zeros(graph.x.shape[0], dtype=torch.long)
+                st.subheader("🤖 Dual-Engine Prediction")
+                with st.spinner("Processing thermodynamic and kinetic profiles..."):
+                    model_A.eval()
+                    model_B.eval()
+                    graph_a, graph_b = smiles_to_graphs(smiles)
+                    
+                    if graph_a is not None and graph_b is not None:
+                        batch = torch.zeros(graph_a.x.shape[0], dtype=torch.long)
+                        
+                        # Predict Model A (LUMO)
                         scaled_solvent = solvent_scaler.transform(np.array([[diel, dip]]))
                         sol_tensor = torch.tensor(scaled_solvent, dtype=torch.float)
-
                         with torch.no_grad():
-                            scaled_pred = model(graph.x, graph.edge_index, batch, sol_tensor, edge_attr=graph.edge_attr).numpy()
-                            pred_ev = lumo_scaler.inverse_transform(scaled_pred)[0][0]
+                            scaled_lumo = model_A(graph_a.x, graph_a.edge_index, batch, sol_tensor, edge_attr=graph_a.edge_attr).numpy()
+                            pred_lumo = lumo_scaler.inverse_transform(scaled_lumo)[0][0]
+                            
+                            # Predict Model B (Reorganization Energy)
+                            batch_b = torch.zeros(graph_b.x.shape[0], dtype=torch.long)
+                            data_b = Data(x=graph_b.x, edge_index=graph_b.edge_index, batch=batch_b, spectral=graph_b.spectral)
+                            scaled_reorg = model_B(data_b).numpy()
+                            pred_reorg = reorg_scaler.inverse_transform(scaled_reorg)[0][0]
                         
-                        st.metric(label=f"Predicted LUMO in {sol_choice}", value=f"{pred_ev:.3f} eV")
-                        if pred_ev <= -4.0: st.success("✅ Deep LUMO: Highly Air-Stable in this environment.")
-                        elif pred_ev <= -3.5: st.warning("⚠️ Intermediate Stability.")
-                        else: st.error("❌ Shallow LUMO: Oxidation Risk.")
+                        # Display Results
+                        subcol1, subcol2 = st.columns(2)
+                        subcol1.metric(label=f"LUMO in {sol_choice}", value=f"{pred_lumo:.3f} eV")
+                        subcol2.metric(label="Reorganization Energy (λ)", value=f"{pred_reorg:.3f} eV")
+                        
+                        if pred_lumo <= -3.8: st.success("✅ Deep LUMO: Resists Ambient Oxidation.")
+                        else: st.error("❌ Shallow LUMO: Oxidation Risk in air.")
+                        
+                        if pred_reorg <= 0.200: st.success("⚡ High Mobility: Rigid structural backbone.")
+                        else: st.warning("🧱 Lower Mobility: High structural distortion upon charging.")
 
             with st.container(border=True):
-                st.subheader("🌐 PubChem Database Cross-Reference")
                 pc = get_pubchem_data(smiles)
-                st.markdown(f"**Compound CID:** `{pc['CID']}` | **IUPAC Name:** `{pc['Name']}` | **XLogP:** `{pc['XLogP']}`")
+                st.markdown(f"**PubChem CID:** `{pc['CID']}` | **IUPAC:** `{pc['Name']}`")
 
     with col_viz:
         if mol:
             with st.container(border=True):
-                st.subheader("📐 Structural Energy Optimization")
-                mol = Chem.AddHs(mol)
-                AllChem.EmbedMolecule(mol, randomSeed=42)
-                try: AllChem.UFFOptimizeMolecule(mol)
+                st.subheader("📐 3D Spatial Inspector")
+                mol_3d = Chem.AddHs(mol)
+                AllChem.EmbedMolecule(mol_3d, randomSeed=42)
+                try: AllChem.UFFOptimizeMolecule(mol_3d)
                 except: pass
                 
                 tox = check_toxicity(mol)
@@ -203,7 +274,7 @@ with tab1:
                 else: st.error(f"🚨 ALERT: {tox}")
 
                 viewer = py3Dmol.view(width=500, height=400)
-                viewer.addModel(Chem.MolToMolBlock(mol), "mol")
+                viewer.addModel(Chem.MolToMolBlock(mol_3d), "mol")
                 viewer.setStyle({'stick': {}, 'sphere': {'radius': 0.3}})
                 viewer.addSurface(py3Dmol.VDW, {'opacity': 0.45, 'colorscheme': 'cyanCarbon'})
                 viewer.zoomTo()
@@ -211,88 +282,59 @@ with tab1:
 
 # --- TAB 2: BATCH SCREENING ---
 with tab2:
-    st.subheader("📊 Batch Screening in Liquid Environments")
-    st.info("Upload a CSV containing your SMILES strings. Select a processing solvent, and the AI will predict the solvated LUMO for every molecule in the batch instantly.")
-    
+    st.subheader("📊 High-Throughput μ-TEG Screening")
     col_bsolv, col_bupl = st.columns(2)
     batch_sol_choice = col_bsolv.selectbox("Batch Processing Solvent:", list(SOLVENTS.keys()))
     b_diel, b_dip = SOLVENTS[batch_sol_choice]
     
-    uploaded_file = col_bupl.file_uploader("Upload Screening Candidates (.csv)", type=["csv"])
+    uploaded_file = col_bupl.file_uploader("Upload Candidates (.csv)", type=["csv"])
     
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
         smiles_col = st.selectbox("Identify SMILES Column:", df.columns)
         
-        if st.button("Initialize Environment Screening", type="primary"):
+        if st.button("Initialize Dual-Engine Screening", type="primary"):
             bar = st.progress(0)
-            preds, toxs, sims = [], [], []
-            model.eval()
+            lumos, reorgs, toxs, sims = [], [], [], []
+            model_A.eval()
+            model_B.eval()
             
-            scaled_solvent = solvent_scaler.transform(np.array([[b_diel, b_dip]]))
-            sol_tensor = torch.tensor(scaled_solvent, dtype=torch.float)
+            sol_tensor = torch.tensor(solvent_scaler.transform(np.array([[b_diel, b_dip]])), dtype=torch.float)
             
             for i, s in enumerate(df[smiles_col]):
                 try:
                     s_str = str(s).strip()
                     m = Chem.MolFromSmiles(s_str)
-                    toxs.append(check_toxicity(m) if m else "Corrupt SMILES")
+                    toxs.append(check_toxicity(m) if m else "Corrupt")
                     sims.append(calculate_tanimoto_domain(s_str, training_fps))
                     
-                    g = smiles_to_graph(s_str)
-                    if g:
-                        b = torch.zeros(g.x.shape[0], dtype=torch.long)
+                    ga, gb = smiles_to_graphs(s_str)
+                    if ga and gb:
                         with torch.no_grad():
-                            p = model(g.x, g.edge_index, b, sol_tensor, edge_attr=g.edge_attr).numpy()
-                        preds.append(round(lumo_scaler.inverse_transform(p)[0][0], 3))
-                    else: preds.append("Inference Failed")
+                            ba = torch.zeros(ga.x.shape[0], dtype=torch.long)
+                            p_lumo = model_A(ga.x, ga.edge_index, ba, sol_tensor, edge_attr=ga.edge_attr).numpy()
+                            lumos.append(round(lumo_scaler.inverse_transform(p_lumo)[0][0], 3))
+                            
+                            bb = torch.zeros(gb.x.shape[0], dtype=torch.long)
+                            db = Data(x=gb.x, edge_index=gb.edge_index, batch=bb, spectral=gb.spectral)
+                            p_reorg = model_B(db).numpy()
+                            reorgs.append(round(reorg_scaler.inverse_transform(p_reorg)[0][0], 3))
+                    else:
+                        lumos.append("Failed")
+                        reorgs.append("Failed")
                 except:
-                    preds.append("Error"); toxs.append("Error"); sims.append(0.0)
+                    lumos.append("Error"); reorgs.append("Error"); toxs.append("Error"); sims.append(0.0)
                 bar.progress((i+1)/len(df))
                 
-            df[f'Predicted_LUMO_eV_in_{batch_sol_choice}'] = preds
+            df[f'LUMO_eV_in_{batch_sol_choice}'] = lumos
+            df['Reorganization_Energy_eV'] = reorgs
             df['Toxicity_Status'] = toxs
             df['Tanimoto_Similarity'] = sims
             st.session_state.batch_df = df
-            st.success("🔬 Solvated virtual screening complete!")
+            st.success("🔬 Dual-engine virtual screening complete!")
             
         if "batch_df" in st.session_state:
             res_df = st.session_state.batch_df
             st.dataframe(res_df, use_container_width=True)
-            st.download_button(
-                label="📥 Export Screened Data (.csv)", 
-                data=res_df.to_csv(index=False).encode('utf-8'), 
-                file_name=f"screened_ote_{batch_sol_choice}.csv",
-                mime="text/csv"
-            )
-
-            st.markdown("---")
-            with st.container(border=True):
-                st.subheader("🔍 Real-Time Compound Inspector")
-                valid_smiles = [s for s in res_df[smiles_col] if type(s) == str and Chem.MolFromSmiles(s.strip()) is not None]
-                
-                if valid_smiles:
-                    inspect_smiles = st.selectbox("Select Target Compound from Screened Batch:", valid_smiles)
-                    
-                    b_col1, b_col2 = st.columns(2)
-                    with b_col1:
-                        i_mol = Chem.MolFromSmiles(inspect_smiles.strip())
-                        i_mol = Chem.AddHs(i_mol)
-                        AllChem.EmbedMolecule(i_mol, randomSeed=42)
-                        try: AllChem.UFFOptimizeMolecule(i_mol)
-                        except: pass
-                            
-                        viewer2 = py3Dmol.view(width=450, height=350)
-                        viewer2.addModel(Chem.MolToMolBlock(i_mol), "mol")
-                        viewer2.setStyle({'stick': {}})
-                        viewer2.addSurface(py3Dmol.VDW, {'opacity': 0.5, 'colorscheme': 'cyanCarbon'})
-                        viewer2.zoomTo()
-                        showmol(viewer2, height=350, width=450)
-                    
-                    with b_col2:
-                        pc_info = get_pubchem_data(inspect_smiles.strip())
-                        st.markdown(f"**Structural Format:** `{inspect_smiles}`")
-                        st.markdown(f"**PubChem CID Link:** `{pc_info['CID']}`")
-                        st.markdown(f"**Systematic Title Name:** {pc_info['Name']}")
-                        st.markdown(f"**Calculated XLogP Parameter:** `{pc_info['XLogP']}`")
-                        
+            st.download_button("📥 Export Screened Data", res_df.to_csv(index=False).encode('utf-8'), "screened_muteg.csv", "text/csv")
+    

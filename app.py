@@ -205,8 +205,90 @@ with tab1:
                 viewer.zoomTo()
                 showmol(viewer, height=400, width=500)
 
-# --- TAB 2: BATCH SCREENING (Unchanged for brevity, works identical as before!) ---
+# --- TAB 2: BATCH SCREENING ---
 with tab2:
     st.subheader("📊 Batch Screening in Liquid Environments")
     st.info("Upload a CSV containing your SMILES strings. Select a processing solvent, and the AI will predict the solvated LUMO for every molecule in the batch instantly.")
     
+    col_bsolv, col_bupl = st.columns(2)
+    batch_sol_choice = col_bsolv.selectbox("Batch Processing Solvent:", list(SOLVENTS.keys()))
+    b_diel, b_dip = SOLVENTS[batch_sol_choice]
+    
+    uploaded_file = col_bupl.file_uploader("Upload Screening Candidates (.csv)", type=["csv"])
+    
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file)
+        smiles_col = st.selectbox("Identify SMILES Column:", df.columns)
+        
+        if st.button("Initialize Environment Screening", type="primary"):
+            bar = st.progress(0)
+            preds, toxs, sims = [], [], []
+            model.eval()
+            
+            scaled_solvent = solvent_scaler.transform(np.array([[b_diel, b_dip]]))
+            sol_tensor = torch.tensor(scaled_solvent, dtype=torch.float)
+            
+            for i, s in enumerate(df[smiles_col]):
+                try:
+                    s_str = str(s).strip()
+                    m = Chem.MolFromSmiles(s_str)
+                    toxs.append(check_toxicity(m) if m else "Corrupt SMILES")
+                    sims.append(calculate_tanimoto_domain(s_str, training_fps))
+                    
+                    g = smiles_to_graph(s_str)
+                    if g:
+                        b = torch.zeros(g.x.shape[0], dtype=torch.long)
+                        with torch.no_grad():
+                            p = model(g.x, g.edge_index, b, sol_tensor, edge_attr=g.edge_attr).numpy()
+                        preds.append(round(lumo_scaler.inverse_transform(p)[0][0], 3))
+                    else: preds.append("Inference Failed")
+                except:
+                    preds.append("Error"); toxs.append("Error"); sims.append(0.0)
+                bar.progress((i+1)/len(df))
+                
+            df[f'Predicted_LUMO_eV_in_{batch_sol_choice}'] = preds
+            df['Toxicity_Status'] = toxs
+            df['Tanimoto_Similarity'] = sims
+            st.session_state.batch_df = df
+            st.success("🔬 Solvated virtual screening complete!")
+            
+        if "batch_df" in st.session_state:
+            res_df = st.session_state.batch_df
+            st.dataframe(res_df, use_container_width=True)
+            st.download_button(
+                label="📥 Export Screened Data (.csv)", 
+                data=res_df.to_csv(index=False).encode('utf-8'), 
+                file_name=f"screened_ote_{batch_sol_choice}.csv",
+                mime="text/csv"
+            )
+
+            st.markdown("---")
+            with st.container(border=True):
+                st.subheader("🔍 Real-Time Compound Inspector")
+                valid_smiles = [s for s in res_df[smiles_col] if type(s) == str and Chem.MolFromSmiles(s.strip()) is not None]
+                
+                if valid_smiles:
+                    inspect_smiles = st.selectbox("Select Target Compound from Screened Batch:", valid_smiles)
+                    
+                    b_col1, b_col2 = st.columns(2)
+                    with b_col1:
+                        i_mol = Chem.MolFromSmiles(inspect_smiles.strip())
+                        i_mol = Chem.AddHs(i_mol)
+                        AllChem.EmbedMolecule(i_mol, randomSeed=42)
+                        try: AllChem.UFFOptimizeMolecule(i_mol)
+                        except: pass
+                            
+                        viewer2 = py3Dmol.view(width=450, height=350)
+                        viewer2.addModel(Chem.MolToMolBlock(i_mol), "mol")
+                        viewer2.setStyle({'stick': {}})
+                        viewer2.addSurface(py3Dmol.VDW, {'opacity': 0.5, 'colorscheme': 'cyanCarbon'})
+                        viewer2.zoomTo()
+                        showmol(viewer2, height=350, width=450)
+                    
+                    with b_col2:
+                        pc_info = get_pubchem_data(inspect_smiles.strip())
+                        st.markdown(f"**Structural Format:** `{inspect_smiles}`")
+                        st.markdown(f"**PubChem CID Link:** `{pc_info['CID']}`")
+                        st.markdown(f"**Systematic Title Name:** {pc_info['Name']}")
+                        st.markdown(f"**Calculated XLogP Parameter:** `{pc_info['XLogP']}`")
+        

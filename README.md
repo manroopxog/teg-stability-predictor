@@ -1,7 +1,7 @@
 # ⚡ Model A: Solvent-Aware Deep LUMO Suite
 
 <div align="center">
-  <a href="" target="_blank">
+  <a href="https://teg-stability-predictor-ajupdywh7jmcxqcfaoiecy.streamlit.app/" target="_blank">
     <img src="https://img.shields.io/badge/Launch_Interactive_Dashboard-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Launch Dashboard">
   </a>
 </div>

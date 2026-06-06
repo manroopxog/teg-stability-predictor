@@ -11,7 +11,6 @@ import pandas as pd
 import urllib.parse
 import requests
 import py3Dmol
-import io
 from stmol import showmol
 
 # ==========================================
@@ -64,7 +63,7 @@ def smiles_to_graph(smiles):
     return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
 
 # ==========================================
-# 2. CONSTANTS & UTILS
+# 2. CONSTANTS & UTILS (PUBCHEM RESTORED)
 # ==========================================
 SOLVENTS = {
     "Vacuum (Gas Phase)": [1.0, 0.0],
@@ -100,7 +99,6 @@ st.set_page_config(page_title="Solvent-Aware LUMO Screener", layout="wide")
 @st.cache_resource
 def load_assets():
     m = SolventAwareGAT()
-    # Expecting the exact base names you download from Drive
     m.load_state_dict(torch.load('solvent_aware_model.pth', map_location='cpu'))
     l_scaler = joblib.load('lumo_scaler.pkl')
     s_scaler = joblib.load('solvent_scaler.pkl')
@@ -147,8 +145,6 @@ with tab1:
                     graph = smiles_to_graph(smiles)
                     if graph is not None:
                         batch = torch.zeros(graph.x.shape[0], dtype=torch.long)
-                        
-                        # Apply Solvent Scaler
                         scaled_solvent = solvent_scaler.transform(np.array([[diel, dip]]))
                         sol_tensor = torch.tensor(scaled_solvent, dtype=torch.float)
 
@@ -160,6 +156,15 @@ with tab1:
                         if pred_ev <= -4.0: st.success("✅ Deep LUMO: Highly Air-Stable in this environment.")
                         elif pred_ev <= -3.5: st.warning("⚠️ Intermediate Stability.")
                         else: st.error("❌ Shallow LUMO: Oxidation Risk.")
+
+            # RESTORED PUBCHEM SECTION
+            with st.container(border=True):
+                st.subheader("🌐 PubChem Database Cross-Reference")
+                with st.spinner("Querying National Institutes of Health (NIH)..."):
+                    pc = get_pubchem_data(smiles)
+                    st.markdown(f"**Compound CID:** `{pc['CID']}`")
+                    st.markdown(f"**IUPAC Name:** `{pc['Name']}`")
+                    st.markdown(f"**Bioaccumulation (XLogP):** `{pc['XLogP']}`")
 
     with col_viz:
         if mol:
@@ -201,7 +206,6 @@ with tab2:
             preds, toxs = [], []
             model.eval()
             
-            # Prepare constant solvent tensor for the whole batch
             scaled_solvent = solvent_scaler.transform(np.array([[b_diel, b_dip]]))
             sol_tensor = torch.tensor(scaled_solvent, dtype=torch.float)
             
@@ -227,11 +231,43 @@ with tab2:
             st.success("🔬 Solvated virtual screening complete!")
             
         if "batch_df" in st.session_state:
-            st.dataframe(st.session_state.batch_df, use_container_width=True)
+            res_df = st.session_state.batch_df
+            st.dataframe(res_df, use_container_width=True)
             st.download_button(
                 label="📥 Export Screened Data (.csv)", 
-                data=st.session_state.batch_df.to_csv(index=False).encode('utf-8'), 
+                data=res_df.to_csv(index=False).encode('utf-8'), 
                 file_name=f"screened_ote_{batch_sol_choice}.csv",
                 mime="text/csv"
-        )
+            )
+
+            # RESTORED INTERACTIVE INSPECTOR WITH PUBCHEM
+            st.markdown("---")
+            with st.container(border=True):
+                st.subheader("🔍 Real-Time Compound Inspector")
+                valid_smiles = [s for s in res_df[smiles_col] if type(s) == str and Chem.MolFromSmiles(s.strip()) is not None]
+                
+                if valid_smiles:
+                    inspect_smiles = st.selectbox("Select Target Compound from Screened Batch:", valid_smiles)
+                    
+                    b_col1, b_col2 = st.columns(2)
+                    with b_col1:
+                        i_mol = Chem.MolFromSmiles(inspect_smiles.strip())
+                        i_mol = Chem.AddHs(i_mol)
+                        AllChem.EmbedMolecule(i_mol, randomSeed=42)
+                        try: AllChem.UFFOptimizeMolecule(i_mol)
+                        except: pass
+                            
+                        viewer2 = py3Dmol.view(width=450, height=350)
+                        viewer2.addModel(Chem.MolToMolBlock(i_mol), "mol")
+                        viewer2.setStyle({'stick': {}})
+                        viewer2.addSurface(py3Dmol.VDW, {'opacity': 0.5, 'colorscheme': 'cyanCarbon'})
+                        viewer2.zoomTo()
+                        showmol(viewer2, height=350, width=450)
+                    
+                    with b_col2:
+                        pc_info = get_pubchem_data(inspect_smiles.strip())
+                        st.markdown(f"**Structural Format:** `{inspect_smiles}`")
+                        st.markdown(f"**PubChem CID Link:** `{pc_info['CID']}`")
+                        st.markdown(f"**Systematic Title Name:** {pc_info['Name']}")
+                        st.markdown(f"**Calculated XLogP Parameter:** `{pc_info['XLogP']}`")
             

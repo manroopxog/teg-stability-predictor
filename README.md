@@ -42,14 +42,15 @@ This pipeline is an HTVS pre-ranker, not a replacement for high-level DFT method
 
 To run this pipeline locally, verify the PyTorch weights, or bypass the web interface for batch screening:
 
-`git clone https://github.com/your-username/muteg-discovery-suite.git`  
-`cd muteg-discovery-suite`  
-`pip install -r requirements.txt`  
-`streamlit run app.py`
+```git clone https://github.com/your-username/muteg-discovery-suite.git```  
+```cd muteg-discovery-suite``` 
+```pip install -r requirements.txt```  
+```streamlit run app.py```
 
 *(Note: Ensure all `.pth` model weights and `.pkl` scalers remain in the root directory)*
 
 ---
 
-**Developer:** Manroop Manota    
+**Developer:** Manroop Manota  
+**Institution:** Swami Shraddhanand College, University of Delhi  
 **Focus:** Computational Materials Chemistry & AI Data Workflow Integration

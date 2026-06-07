@@ -1,8 +1,8 @@
-<h1 align="center">⚡ Indigenous &mu;-TEG Discovery Suite</h1>
+<h1 align="left">⚡ &mu;-TEG Discovery Suite</h1>
 
 <p align="center">
   <a href="https://teg-stability-predictor-ajupdywh7jmcxqcfaoiecy.streamlit.app/" target="_blank">
-    <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Open in Streamlit">
+    <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Live Application">
   </a>
 </p>
 
@@ -42,7 +42,7 @@
 <hr>
 
 <h2>🔬 Scientific Disclaimer</h2>
-<p>This pipeline is an HTVS pre-ranker, not a replacement for high-level DFT methods. By reducing 3D conformational analysis to 2D topological graph embeddings, the suite trades absolute numerical precision for massive computational scalability. The intended workflow is to isolate the top 1% of highly rigid candidates for expensive supercomputer DFT optimizations.</p>
+<p>This pipeline is an HTVS pre-ranker, not a replacement for high-level DFT methods. By reducing 3D conformational analysis to 2D topological graph embeddings, the suite trades absolute numerical precision for massive computational scalability. The intended workflow is to isolate the top 1% of highly rigid candidates for supercomputer DFT optimizations.</p>
 
 <hr>
 
@@ -60,6 +60,5 @@ streamlit run app.py</code></pre>
 
 <p>
   <strong>Developer:</strong> Manroop Manota<br>
-  <strong>Institution:</strong> Swami Shraddhanand College, University of Delhi<br>
-  <strong>Focus:</strong> Computational Materials Chemistry & AI Data Workflow Integration
+  <strong>Focus:</strong> Computational Materials Chemistry & Machine Data Workflow Integration
 </p>

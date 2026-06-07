@@ -1,40 +1,64 @@
-# ⚡ Model A: Solvent-Aware Deep LUMO Suite
+# ⚡ Indigenous μ-TEG Discovery Suite
 
-<div align="center">
-  <a href="https://teg-stability-predictor-ajupdywh7jmcxqcfaoiecy.streamlit.app/" target="_blank">
-    <img src="https://img.shields.io/badge/Launch_Interactive_Dashboard-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Launch Dashboard">
-  </a>
-</div>
+**Live Application:** [https://teg-stability-predictor-ajupdywh7jmcxqcfaoiecy.streamlit.app/]
 
----
+**A Physics-Informed, Dual-Engine High-Throughput Virtual Screening (HTVS) Pipeline for n-Type Organic Thermoelectrics**
 
-## 🔬 Scientific Overview
-Model A represents a paradigm shift in high-throughput computational screening for n-type organic thermoelectric (OTE) polymers. Historically, machine learning predictors have relied on gas-phase vacuum calculations (DFT), which fail to account for the crucial solvation energies present during real-world Cyclic Voltammetry (CV) testing and device fabrication. 
+Organic Micro-Thermoelectric Generators (μ-TEGs) require semiconductors with deep Lowest Unoccupied Molecular Orbitals (LUMO) for ambient stability, and low Reorganization Energies (λ) for high charge carrier mobility. 
 
-Model A bridges this gap. By deploying a multi-modal Graph Attention Network (GAT), this suite dynamically calculates the Lowest Unoccupied Molecular Orbital (LUMO) energy shifts based on the exact physical fluid dynamics of the processing solvent. By mapping how polar environments electrostatically stabilize radical anions, Model A allows researchers to accurately predict ambient air stability against oxygen and moisture degradation before any physical synthesis occurs.
+Traditional Density Functional Theory (DFT) calculations are computationally expensive, making large-scale library screening bottlenecked. This web application introduces a dual-engine Graph Attention Network (GAT) pipeline designed to act as a pre-DFT ranker, processing molecular topologies in seconds while respecting core quantum mechanical principles.
 
 ---
 
-## 🚀 Core Architecture & Features
+## 🧠 Core Architecture: The Dual Engines
 
-### 1. Dynamic Solvent-Aware Physics Engine
-* **Environmental Interpolation:** Predicts absolute LUMO energy levels across distinct chemical environments (e.g., Toluene, Dichloromethane, Chloroform, Acetonitrile).
-* **Electrostatic Scaling:** Calculates precise energetic stabilization shifts using continuous solvent descriptors (**Dielectric Constants** and **Dipole Moments**). This allows the neural network to mathematically interpolate and predict behavior in custom, user-defined solvents not explicitly seen in the training data.
+This suite decouples the thermodynamic and kinetic properties of molecular discovery into two specialized neural networks, preventing feature confusion and allowing for physics-specific data extraction.
 
-### 2. Multi-Modal Graph Attention Network (GAT)
-* **Topological Mapping:** The AI brain is built on a 4-layer GAT architecture that processes 11 unique quantum node features (including atomic hybridization states, aromaticity, and formal charge) alongside bond-order edge featurizations.
-* **Feature Concatenation:** Molecular graph embeddings are globally pooled into a 64-dimensional vector and concatenated with the physical solvent tensors. This allows the dense linear layers to weigh the structural topology of the semiconductor against the electrostatic pressure of the solvent.
+### 1. Model A: The Thermodynamic Shield (Solvated LUMO)
+* Objective: Predict the LUMO energy levels in varied dielectric environments.
+* Architecture: A Solvent-Aware Graph Attention Network that dynamically adjusts predictions based on the user-defined solvent's Dielectric Constant and Dipole Moment.
+* Utility: Rapidly filters out shallow-LUMO candidates that would rapidly oxidize in ambient air, isolating robust n-type materials.
 
-### 3. Real-Time 3D Structural Minimization
-* **Force Field Geometry:** Integrates the Universal Force Field (UFF) to instantly optimize the 3D conformation of target molecules and calculate steric strain energies.
-* **Electronic Visualization:** Automatically renders interactive Van der Waals (VDW) electron density envelopes, allowing researchers to visually assess steric bulk, backbone planarization, and potential intermolecular packing disruptions.
-
-### 4. Toxicity & Bioaccumulation Screening
-* **Reactive Flagging:** Routes all molecular candidates through the PAINS (Pan Assay Interference Compounds) structural catalog to automatically flag highly reactive, unstable, or assay-interfering sub-structures.
-* **Database Integration:** Connects directly to the NIH PubChem REST API to fetch verified compound CIDs, systematic IUPAC nomenclature, and calculated `XLogP` values to assess environmental bioaccumulation risks.
-
-### 5. High-Throughput Batch Pipeline
-* **Library Screening:** Supports the upload of massive `.csv` libraries for instant, solvent-specific batch evaluation. 
-* **Data Matrix Generation:** The system automatically compiles and generates a downloadable matrix of solvated LUMO predictions and toxicity flags, paired with a real-time, interactive 3D structural inspector for deep-diving into individual batch candidates.
+### 2. Model B: The Kinetic Engine (Reorganization Energy)
+* Objective: Estimate the structural rigidity and electron mobility of the π-conjugated backbone.
+* Physics Engine: Utilizes Heteroatom-Parameterized Hückel Theory. Standard topological matrices are blind to electronegativity. This engine injects empirical Coulomb Integrals and Resonance Integrals into the adjacency matrix to mathematically account for the aggressive electron-withdrawing nature of halogens and cyano groups (e.g., F, N, O).
+* Anchored Training: To overcome the inherent p-type donor bias present in massive open-source material datasets, the training pipeline utilizes an Oversampled Anchoring technique. High-performance n-type literature standards (like TCNQ and F4-TCNQ) are heavily weighted during training to explicitly teach the neural network the physics of electron acceptors.
 
 ---
+
+## 🛡️ Built-In Security & Validation Filters
+
+Machine learning models are probabilistic estimators, and relying on them blindly in physical chemistry is dangerous. This application includes automated guardrails:
+
+* Tanimoto Domain of Applicability: The suite calculates the Morgan Fingerprint (Radius=2, 2048-bit) of every input and runs a Tanimoto Similarity index against the original training data. If a user inputs an out-of-domain molecule (e.g., a pharmaceutical drug), the system flags it, effectively making the AI "self-aware" of its own mathematical blind spots.
+* PAINS Toxicity Filter: Integrates RDKit's Pan Assay Interference Compounds (PAINS) catalog to automatically flag structurally unstable or highly reactive functional groups.
+* PubChem Cross-Referencing: Automatically fetches Systematic IUPAC names, CIDs, and calculated XLogP values (hydrophobicity) via the NIH PubChem REST API to assist with solvent processability planning.
+
+---
+
+## 🔬 Scientific Disclaimer
+
+This pipeline is an HTVS pre-ranker, not a replacement for high-level ab initio or DFT methods (e.g., B3LYP/6-31G*). By reducing 3D conformational analysis to 2D topological graph embeddings and 1D Hückel eigenvalues, the suite trades absolute numerical precision for massive computational scalability. 
+
+The intended workflow is to use this suite to screen libraries of 100,000+ molecules, isolate the top 1% of deep-LUMO, highly rigid candidates, and pass those isolated structures onto supercomputer DFT optimizations.
+
+---
+
+## 💻 For Developers: Local Verification & Reproducibility 
+
+If you wish to run this pipeline locally, verify the PyTorch weights, or bypass the web interface for massive batch screening, you can clone this repository. 
+
+Prerequisites: Python 3.9+
+
+    git clone https://github.com/your-username/muteg-discovery-suite.git
+    cd muteg-discovery-suite
+    pip install -r requirements.txt
+    streamlit run app.py
+
+Make sure all `.pth` model weights and `.pkl` scalers remain in the root directory alongside `app.py`.
+
+---
+
+**Developer / Lead Researcher:** Manroop Manota
+**Institution:** Swami Shraddhanand College, University of Delhi
+**Focus:** Computational Materials Chemistry & AI Data Workflow Integration

@@ -1,6 +1,6 @@
 # ⚡ Indigenous μ-TEG Discovery Suite
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)]()
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://teg-stability-predictor-ajupdywh7jmcxqcfaoiecy.streamlit.app/)
 
 **A Physics-Informed, Dual-Engine High-Throughput Virtual Screening (HTVS) Pipeline for n-Type Organic Thermoelectrics**
 
